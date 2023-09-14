@@ -250,7 +250,7 @@ impl ClusterCryptoObjects {
     }
 
     fn fill_cert_key_signers(&mut self) -> Result<()> {
-        for cert_key_pair in &self.cert_key_pairs {
+        for (idx, cert_key_pair) in self.cert_key_pairs.clone().iter().enumerate() {
             let mut true_signing_cert: Option<Rc<RefCell<CertKeyPair>>> = None;
             if !(*(**cert_key_pair).borrow().distributed_cert)
                 .borrow()
@@ -287,6 +287,8 @@ impl ClusterCryptoObjects {
                         "warning: no signing cert found for cert in {}",
                         (*(**cert_key_pair).borrow().distributed_cert).borrow().locations
                     );
+
+                    self.cert_key_pairs.remove(idx);
                 }
             }
 

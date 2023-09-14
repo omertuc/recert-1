@@ -6,7 +6,7 @@ use super::{
     distributed_cert::DistributedCert,
     distributed_private_key::DistributedPrivateKey,
     distributed_public_key::DistributedPublicKey,
-    locations::{FileContentLocation, FileLocation, K8sLocation, Location},
+    locations::{FileContentLocation, FileLocation, K8sLocation, Location, Locations},
     pem_utils,
     signee::Signee,
 };
@@ -22,7 +22,12 @@ use bcder::{BitString, Oid};
 use bytes::Bytes;
 use fn_error_context::context;
 use rsa::signature::Signer;
-use std::{cell::RefCell, collections::HashMap, fmt::Display, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    fmt::Display,
+    rc::Rc,
+};
 use tokio::{self, io::AsyncReadExt};
 use x509_cert::{ext::pkix::SubjectKeyIdentifier, serial_number::SerialNumber};
 use x509_certificate::{
@@ -141,7 +146,13 @@ impl CertKeyPair {
     /// # Errors
     ///
     /// This function will return an error if .
-    #[context["re-signing cert with subject {}", self.distributed_cert.borrow().certificate.subject]]
+    #[context["re-signing cert with subject {} (cert locations {} key locations {})",
+        self.distributed_cert.borrow().certificate.subject,
+        self.distributed_cert.borrow().locations,
+        self.distributed_private_key
+            .as_ref()
+            .map(|k| k.borrow().locations.clone())
+            .unwrap_or_else(|| Locations(HashSet::new()))]]
     pub(crate) fn re_sign_cert(
         &mut self,
         sign_with: Option<&InMemorySigningKeyPair>,
