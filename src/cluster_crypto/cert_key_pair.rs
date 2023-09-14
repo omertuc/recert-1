@@ -271,6 +271,7 @@ impl CertKeyPair {
 
         // Generate the actual signature
         let signature = signing_key.try_sign(&tbs_der)?;
+        let signature2 = sign(signing_key, &tbs_der);
 
         // Create a full certificate by combining the to-be-signed part with the signature itself
         let cert = rfc5280::Certificate {
@@ -377,6 +378,22 @@ impl CertKeyPair {
         )
         .await?)
     }
+}
+
+fn sign(signing_key: &InMemorySigningKeyPair, tbs_der: &[u8]) -> Result<Vec<u8>> {
+    let bytes = match signing_key {
+        InMemorySigningKeyPair::Ecdsa(pair, _, bytes) => {
+            let private_key = ec::Seed::generate(alg.curve, rng, cpu::features())?;
+            let public_key = private_key.compute_public_key()?;
+            Ok(ring::pkcs8::wrap_key(
+                &alg.pkcs8_template,
+                private_key.bytes_less_safe(),
+                public_key.as_ref(),
+            ))
+        }
+        InMemorySigningKeyPair::Ed25519(_) => bail!("signing with ed25519 unimplemented"),
+        InMemorySigningKeyPair::Rsa(_, bytes) => bytes,
+    };
 }
 
 fn fix_akid(

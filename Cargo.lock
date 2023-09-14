@@ -1596,6 +1596,7 @@ dependencies = [
  "p256",
  "pem 2.0.1",
  "pkcs1 0.7.5",
+ "pkcs8 0.10.2",
  "rand",
  "regex",
  "ring",
