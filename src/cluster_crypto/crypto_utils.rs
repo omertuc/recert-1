@@ -197,3 +197,24 @@ pub(crate) fn sign(signing_key: &SigningKey, tbs_der: &[u8]) -> Result<Vec<u8>> 
 
     Ok(command.wait_with_output().context("waiting for openssl dgst")?.stdout)
 }
+
+pub(crate) fn sha256(data: &[u8]) -> Result<Vec<u8>> {
+    // We don't use native Rust sha256 libraries on purpose, because FIPS compliance is a
+    // requirement for us, and we don't know if the native libraries are FIPS compliant.
+
+    let mut command = StdCommand::new("openssl")
+        .args(["dgst", "-sha256", "-binary"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("openssl dgst")?;
+
+    command
+        .stdin
+        .take()
+        .context("getting openssl dgst stdin")?
+        .write_all(data)
+        .context("writing to openssl dgst stdin")?;
+
+    Ok(command.wait_with_output().context("waiting for openssl dgst")?.stdout)
+}

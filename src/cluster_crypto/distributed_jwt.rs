@@ -1,5 +1,5 @@
 use super::{
-    crypto_utils::{verify_jwt, SigningKey},
+    crypto_utils::{sha256, verify_jwt, SigningKey},
     jwt::Jwt,
     jwt::JwtSigner,
     keys::PublicKey,
@@ -9,7 +9,7 @@ use crate::{
     file_utils::{commit_file, encode_resource_data_entry},
     k8s_etcd::{get_etcd_json, InMemoryK8sEtcd},
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as base64_url, Engine as _};
 use jwt_simple::prelude::RSAKeyPairLike;
 use serde::Serialize;
@@ -41,17 +41,14 @@ impl DistributedJwt {
     fn resign(&self, original_public_key: &PublicKey, new_signing_key_pair: &SigningKey) -> Result<String> {
         match &new_signing_key_pair.in_memory_signing_key_pair {
             InMemorySigningKeyPair::Ecdsa(_, _, _) => {
-                bail!("ecdsa unsupported");
+                bail!("ecdsa JWT signing unsupported");
             }
             InMemorySigningKeyPair::Ed25519(_) => {
-                bail!("ed unsupported");
+                bail!("ed JWT signing unsupported");
             }
             InMemorySigningKeyPair::Rsa(_rsa_key_pair, bytes) => {
                 let claims = verify_jwt(original_public_key, self)?;
-
-                let mut sha256 = sha2::Sha256::new();
-                sha256.update(bytes);
-                let kid = base64_url.encode(sha256.finalize());
+                let kid = base64_url.encode(sha256(bytes)?);
 
                 Ok(jwt_simple::prelude::RS256KeyPair::from_der(bytes)?
                     .with_key_id(&kid)
