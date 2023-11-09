@@ -24,8 +24,33 @@ pub(crate) async fn ocp_postprocess(
         .await
         .context("fixing olm secret hash annotation")?;
 
-    delete_leases(in_memory_etcd_client).await.context("deleting leases")?;
-    delete_pods(in_memory_etcd_client).await.context("deleting leases")?;
+    // Leases are meaningless when the cluster is down, so delete them to help the node come up
+    // faster
+    delete_all(in_memory_etcd_client, "leases/").await?;
+
+    // The existing pods and replicasets are likely to misbehave after all the renaming we're doing
+    delete_all(in_memory_etcd_client, "pods/").await?;
+    delete_all(in_memory_etcd_client, "replicasets/").await?;
+
+    // CSRs are always junk, so delete them as they contain the old node name
+    delete_all(in_memory_etcd_client, "certificatesigningrequests/").await?;
+
+    // Delete all node-specific resources
+    delete_all(in_memory_etcd_client, "tuned.openshift.io/profiles").await?;
+    delete_all(in_memory_etcd_client, "csinodes/").await?;
+    delete_all(in_memory_etcd_client, "ptp.openshift.io/nodeptpdevices/").await?;
+    delete_all(in_memory_etcd_client, "minions/").await?; // (minions are what nodes are called in etcd)
+    delete_all(in_memory_etcd_client, "sriovnetwork.openshift.io/sriovnetworknodestates/").await?; // (minions are what nodes are called in etcd)
+
+    // Delete all events as they contain the name
+    delete_all(in_memory_etcd_client, "events/").await?;
+
+    // Delete all endsponts and endpointslices as they contain node names and pod references
+    delete_all(in_memory_etcd_client, "services/endpoints/").await?;
+
+    // Delete ptp-configmap as it contains node-specific PTP config
+    delete_all(in_memory_etcd_client, "configmaps/openshift-ptp/ptp-configmap").await?;
+
     delete_node_kubeconfigs(in_memory_etcd_client)
         .await
         .context("deleting node-kubeconfigs")?;
@@ -103,28 +128,20 @@ pub(crate) async fn delete_node_kubeconfigs(in_memory_etcd_client: &Arc<InMemory
     Ok(())
 }
 
-/// Delete all the leases to help the node come up faster
-pub(crate) async fn delete_leases(etcd_client: &Arc<InMemoryK8sEtcd>) -> Result<()> {
-    join_all(etcd_client.list_keys("leases/").await?.into_iter().map(|key| async move {
-        etcd_client.delete(&key).await.context(format!("deleting {}", key))?;
-        Ok(())
-    }))
+pub(crate) async fn delete_all(etcd_client: &Arc<InMemoryK8sEtcd>, resource_etcd_key_prefix: &str) -> Result<()> {
+    join_all(
+        etcd_client
+            .list_keys(resource_etcd_key_prefix)
+            .await?
+            .into_iter()
+            .map(|key| async move {
+                etcd_client.delete(&key).await.context(format!("deleting {}", key))?;
+                Ok(())
+            }),
+    )
     .await
     .into_iter()
     .collect::<Result<Vec<_>>>()?;
-
-    Ok(())
-}
-
-pub(crate) async fn delete_pods(etcd_client: &Arc<InMemoryK8sEtcd>) -> Result<()> {
-    join_all(etcd_client.list_keys("pods/").await?.into_iter().map(|key| async move {
-        etcd_client.delete(&key).await.context(format!("deleting {}", key))?;
-        Ok(())
-    }))
-    .await
-    .into_iter()
-    .collect::<Result<Vec<_>>>()?;
-
     Ok(())
 }
 

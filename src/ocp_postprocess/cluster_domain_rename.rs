@@ -119,7 +119,10 @@ async fn fix_etcd_resources(
     etcd_rename::fix_machineconfigs(etcd_client, cluster_domain)
         .await
         .context("fixing machineconfigs")?;
-    etcd_rename::fix_apiserver_config(etcd_client, cluster_domain)
+    etcd_rename::fix_openshift_apiserver_configmap(etcd_client, cluster_domain)
+        .await
+        .context("fixing apiserver config")?;
+    etcd_rename::fix_openshift_apiserver_openshiftapiserver(etcd_client, cluster_domain)
         .await
         .context("fixing apiserver config")?;
     etcd_rename::fix_authentication_config(etcd_client, cluster_domain)

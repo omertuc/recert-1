@@ -37,6 +37,12 @@ pub(crate) async fn delete_resources(etcd_client: &Arc<InMemoryK8sEtcd>) -> Resu
                     .await?
                     .into_iter(),
             )
+            .chain(
+                etcd_client
+                    .list_keys("configmaps/openshift-kube-controller-manager/cluster-policy-controller-lock")
+                    .await?
+                    .into_iter(),
+            )
             .chain(etcd_client.list_keys("apiserver.openshift.io/apirequestcounts/").await?.into_iter())
             .chain(
                 etcd_client
@@ -214,7 +220,7 @@ pub(crate) async fn fix_machineconfigs(etcd_client: &Arc<InMemoryK8sEtcd>, clust
     Ok(())
 }
 
-pub(crate) async fn fix_apiserver_config(etcd_client: &Arc<InMemoryK8sEtcd>, cluster_domain: &str) -> Result<()> {
+pub(crate) async fn fix_openshift_apiserver_configmap(etcd_client: &Arc<InMemoryK8sEtcd>, cluster_domain: &str) -> Result<()> {
     let k8s_resource_location = K8sResourceLocation::new(Some("openshift-apiserver"), "Configmap", "config", "v1");
     let mut configmap = get_etcd_json(etcd_client, &k8s_resource_location)
         .await?
@@ -228,6 +234,39 @@ pub(crate) async fn fix_apiserver_config(etcd_client: &Arc<InMemoryK8sEtcd>, clu
     let mut config: Value = serde_yaml::from_slice(data["config.yaml"].as_str().context("config.yaml not a string")?.as_bytes())
         .context("deserializing config.yaml")?;
 
+    fix_openshift_apiserver_config(&mut config, cluster_domain).context("fixing config")?;
+
+    data.insert(
+        "config.yaml".to_string(),
+        serde_json::Value::String(serde_json::to_string(&config).context("serializing config.yaml")?),
+    )
+    .context("could not find original config.yaml")?;
+
+    put_etcd_yaml(etcd_client, &k8s_resource_location, configmap).await?;
+
+    Ok(())
+}
+
+pub(crate) async fn fix_openshift_apiserver_openshiftapiserver(etcd_client: &Arc<InMemoryK8sEtcd>, cluster_domain: &str) -> Result<()> {
+    let k8s_resource_location = K8sResourceLocation::new(None, "OpenShiftAPIServer", "cluster", "operator.openshift.io/v1");
+
+    let mut openshiftapiserver = get_etcd_json(etcd_client, &k8s_resource_location)
+        .await
+        .context("getting openshiftapiserver")?
+        .context(format!("{} not found", k8s_resource_location.as_etcd_key()))?;
+
+    let config = &mut openshiftapiserver
+        .pointer_mut("/spec/observedConfig")
+        .context("no /spec/observedConfig")?;
+
+    fix_openshift_apiserver_config(config, cluster_domain).context("fixing config")?;
+
+    put_etcd_yaml(etcd_client, &k8s_resource_location, openshiftapiserver).await?;
+
+    Ok(())
+}
+
+pub(crate) fn fix_openshift_apiserver_config(config: &mut Value, cluster_domain: &str) -> Result<()> {
     config
         .pointer_mut("/routingConfig")
         .context("routingConfig not found")?
@@ -239,15 +278,7 @@ pub(crate) async fn fix_apiserver_config(etcd_client: &Arc<InMemoryK8sEtcd>, clu
         )
         .context("missing subdomain")?;
 
-    // NOTE: If we ever stop using a fake internal IP, we need to change .storageConfig.urls[0] to be the new IP here
-
-    data.insert(
-        "config.yaml".to_string(),
-        serde_json::Value::String(serde_json::to_string(&config).context("serializing config.yaml")?),
-    )
-    .context("could not find original config.yaml")?;
-
-    put_etcd_yaml(etcd_client, &k8s_resource_location, configmap).await?;
+    // TODO: If we ever stop using a fake internal IP, we need to change .storageConfig.urls[0] to be the new IP here
 
     Ok(())
 }
@@ -1170,6 +1201,14 @@ pub(crate) async fn fix_routes(etcd_client: &Arc<InMemoryK8sEtcd>, cluster_domai
         etcd_client,
         K8sResourceLocation::new(Some("openshift-monitoring"), "Route", "thanos-querier", "route.openshift.io/v1"),
         format!("thanos-querier-openshift-monitoring.apps.{cluster_domain}"),
+        false,
+    )
+    .await?;
+
+    fix_route(
+        etcd_client,
+        K8sResourceLocation::new(Some("openshift-authentication"), "Route", "oauth-openshift", "route.openshift.io/v1"),
+        format!("oauth-openshift.apps.{cluster_domain}"),
         false,
     )
     .await?;
