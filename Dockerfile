@@ -22,4 +22,5 @@ WORKDIR app
 RUN apt-get update
 RUN apt-get install -y openssl
 COPY --from=builder /app/target/release/recert /usr/local/bin
+RUN ln -s /usr/local/bin/recert /usr/local/bin/ocp-rename
 ENTRYPOINT ["/usr/local/bin/recert"]
