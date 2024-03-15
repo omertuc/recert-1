@@ -109,7 +109,7 @@ pub(crate) async fn fix_labeled_configmaps(etcd_client: &InMemoryK8sEtcd, full_m
     Ok(())
 }
 
-pub(crate) async fn fix_original_additional_trust_bundle(etcd_client: &InMemoryK8sEtcd, additional_trust_bundle: &str) -> Result<String> {
+pub(crate) async fn fix_original_additional_trust_bundle(etcd_client: &InMemoryK8sEtcd, additional_trust_bundle: &str) -> Result<Option<String>> {
     let proxy_config_k8s_resource_location = K8sResourceLocation::new(None, "Proxy", "cluster", "config.openshift.io");
 
     let config = get_etcd_json(etcd_client, &proxy_config_k8s_resource_location)
@@ -121,6 +121,10 @@ pub(crate) async fn fix_original_additional_trust_bundle(etcd_client: &InMemoryK
         .context("no trustedCA in proxy cluster config")?
         .as_str()
         .context("trustedCA not a string")?;
+
+    if trusted_ca_configmap_name.is_empty() {
+        return Ok(None);
+    }
 
     let ca_configmap_k8s_resource_location =
         K8sResourceLocation::new(Some("openshift-config"), "ConfigMap", trusted_ca_configmap_name, "v1");
@@ -142,11 +146,11 @@ pub(crate) async fn fix_original_additional_trust_bundle(etcd_client: &InMemoryK
 
     put_etcd_yaml(etcd_client, &ca_configmap_k8s_resource_location, configmap).await?;
 
-    Ok(original_additional_trust_bundle
+    Ok(Some(original_additional_trust_bundle
         .context("no ca-bundle.crt in trustedCA configmap")?
         .as_str()
         .context("ca-bundle.crt not a string")?
-        .to_string())
+        .to_string()))
 }
 
 pub(crate) async fn fix_monitoring_configmaps(etcd_client: &InMemoryK8sEtcd, new_merged_bundle: &str) -> Result<()> {
