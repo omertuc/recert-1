@@ -1,6 +1,7 @@
 use crate::{
     cluster_crypto::{crypto_utils::ensure_openssl_version, scanning, ClusterCryptoObjects},
     config::{ClusterCustomizations, CryptoCustomizations, RecertConfig},
+    file_utils,
     k8s_etcd::InMemoryK8sEtcd,
     ocp_postprocess::ocp_postprocess,
     rsa_key_pool, server_ssh_keys,
@@ -130,13 +131,16 @@ async fn finalize(
 
     let start = std::time::Instant::now();
 
-    // Since we're using an in-memory fake etcd, we need to also commit the changes to the real
-    // etcd after we're done (unless we're doing a dry run)
+    // Since we're using an in-memory fake etcd and a virtual file system, we need to also commit
+    // the changes to the real etcd and the real filesystem after we're done (unless we're doing a
+    // dry run)
     if !dry_run {
         in_memory_etcd_client
             .commit_to_actual_etcd()
             .await
             .context("commiting etcd cache to actual etcd")?;
+
+        file_utils::commit_filesystem().await.context("commiting filesystem changes")?;
     }
 
     let commit_to_actual_etcd_run_time = RunTime::since_start(start);

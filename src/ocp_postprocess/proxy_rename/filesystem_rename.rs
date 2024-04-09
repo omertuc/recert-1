@@ -2,7 +2,7 @@ use super::{
     args::Proxy,
     utils::{self, fix_containers, fix_machineconfig},
 };
-use crate::file_utils::{self, commit_file, read_file_to_string};
+use crate::file_utils::{self, read_file_to_string, write_file};
 use anyhow::{self, ensure, Context, Result};
 use futures_util::future::join_all;
 use serde_json::Value;
@@ -25,12 +25,11 @@ pub(crate) async fn rename_proxy_env_file(proxy: &Proxy, file: &Path) -> Result<
 }
 
 async fn rename_proxy_env(file: &Path, proxy: &Proxy) -> Result<(), anyhow::Error> {
-    commit_file(
+    write_file(
         file,
         utils::rename_proxy_env_file_contents(proxy, read_file_to_string(file).await.context("reading proxy.env")?),
     )
-    .await
-    .context("writing proxy.env to disk")?;
+    .await;
     Ok(())
 }
 
@@ -79,9 +78,8 @@ pub(crate) async fn fix_filesystem_currentconfig(proxy: &Proxy, dir: &Path) -> R
 
                 fix_machineconfig(&mut config, &proxy)?;
 
-                commit_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?)
-                    .await
-                    .context("writing currentconfig to disk")?;
+                write_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?)
+                    .await;
 
                 anyhow::Ok(())
             }
@@ -125,7 +123,7 @@ pub(crate) async fn fix_pods_yaml(proxy: &Proxy, dir: &Path) -> Result<()> {
                     }
                 };
 
-                commit_file(file_path, pod).await.context("writing pods.yaml to disk")?;
+                write_file(file_path, pod).await;
 
                 anyhow::Ok(())
             }

@@ -3,24 +3,110 @@ use crate::cluster_crypto::{
     locations::{FileLocation, JsonLocation, LocationValueType},
     pem_utils,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD as base64_standard, Engine as _};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering::Relaxed},
+    sync::Arc,
 };
-use tokio::io::AsyncReadExt;
+use tokio::sync::Mutex;
 
-pub(crate) static DRY_RUN: AtomicBool = AtomicBool::new(false);
+lazy_static::lazy_static! {
+    static ref GLOBAL_VFS: Arc<Mutex<VirtualFilesystem>> = Arc::new(Mutex::new(VirtualFilesystem::new()));
+}
 
-pub async fn commit_file(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
-    if !DRY_RUN.load(Relaxed) {
-        tokio::fs::write(path, contents).await?;
+pub(crate) async fn read_file_to_string(file_path: &Path) -> Result<String> {
+    String::from_utf8(GLOBAL_VFS.lock().await.read_file(file_path).await.context("reading file")?).context("file not utf8")
+}
+
+pub async fn write_file(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) {
+    GLOBAL_VFS.lock().await.write_file(path.as_ref(), contents.as_ref().to_vec());
+}
+
+pub async fn rename_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
+    GLOBAL_VFS.lock().await.rename(from.as_ref(), to.as_ref())
+}
+
+pub async fn commit_filesystem() -> Result<()> {
+    GLOBAL_VFS.lock().await.commit()
+}
+
+/// A virtual filesystem that allows reading and writing files in memory. This is useful for
+/// multiple purposes such as doing a dry run of recert, for committing our changes atomically
+/// (e.g. if we run into an error, it's better to leave the filesystem untouched, just as we do
+/// with our etcd abstraction layer), and for recording all the changes we made to the filesystem
+/// for debugging purposes (the struct keeps a record of the original and current contents of each
+/// file, so diffing is possible).
+///
+/// The filesystem is of course not a full implementation of a filesystem, it only supports reading
+/// and writing entire files.
+struct VirtualFilesystem {
+    files: std::collections::HashMap<PathBuf, VirtualFile>,
+}
+
+struct VirtualFile {
+    original: Vec<u8>,
+    current: Vec<u8>,
+}
+
+impl VirtualFilesystem {
+    fn new() -> Self {
+        Self {
+            files: std::collections::HashMap::new(),
+        }
     }
 
-    Ok(())
+    /// If a file doesn't exist, read it from the real filesystem
+    async fn read_file(&mut self, path: &Path) -> Result<Vec<u8>> {
+        Ok(if let Some(file) = self.files.get(path) {
+            file.current.clone()
+        } else {
+            let read_contents = tokio::fs::read(path).await.context("failed to read file")?;
+            self.files.insert(
+                PathBuf::from(path),
+                VirtualFile {
+                    original: read_contents.clone(),
+                    current: read_contents.clone(),
+                },
+            );
+            read_contents
+        })
+    }
+
+    fn write_file(&mut self, path: &Path, contents: Vec<u8>) {
+        let actual_path = if let Some(to) = self.renames.get(path) { to } else { path };
+    }
+
+    fn rename(&mut self, from: &Path, to: &Path) -> Result<()> {
+        self.renames.insert(PathBuf::from(from), PathBuf::from(to));
+
+        Ok(())
+    }
+
+    /// Commits all changes in the virtual filesystem to the real filesystem. Before committing, it
+    /// checks if the file contents have changed since the last read. If they have, it will not
+    /// commit the changes and return an error instead. This is of course racey, but it's still a
+    /// good sanity check. We don't expect any of the files modified by recert to change by other
+    /// processes (the cluster is supposed to be down during recert).
+    fn commit(&mut self) -> Result<()> {
+        for (path, contents) in self.files_current.iter() {
+            if let Some(original_contents) = self.files_original.get(path) {
+                if original_contents != contents {
+                    bail!("file contents have changed since last read");
+                }
+
+                std::fs::write(path, contents).context("failed to write file")?;
+            }
+        }
+
+        for (from, to) in self.renames.iter() {
+            std::fs::rename(from, to).context("failed to rename file")?;
+        }
+
+        Ok(())
+    }
 }
 
 pub(crate) fn globvec(location: &Path, globstr: &str) -> Result<Vec<PathBuf>> {
@@ -39,13 +125,6 @@ pub(crate) fn globvec(location: &Path, globstr: &str) -> Result<Vec<PathBuf>> {
     .filter(|path| !path.is_symlink())
     .filter(|path| !path.is_dir())
     .collect::<Vec<_>>())
-}
-
-pub(crate) async fn read_file_to_string(file_path: &Path) -> Result<String> {
-    let mut file = tokio::fs::File::open(file_path).await?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).await.context("failed to read file")?;
-    Ok(contents)
 }
 
 pub(crate) async fn get_filesystem_yaml(file_location: &FileLocation) -> Result<Value> {

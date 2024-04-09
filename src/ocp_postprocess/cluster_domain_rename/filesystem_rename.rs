@@ -2,7 +2,7 @@ use super::rename_utils::{
     fix_api_server_arguments_domain, fix_apiserver_url_file, fix_kcm_extended_args, fix_kcm_pod, fix_kubeconfig, fix_machineconfig,
     fix_oauth_metadata,
 };
-use crate::file_utils::{self, commit_file, read_file_to_string};
+use crate::file_utils::{self, read_file_to_string, write_file};
 use anyhow::{self, Context, Result};
 use futures_util::future::join_all;
 use serde_json::Value;
@@ -25,12 +25,11 @@ pub(crate) async fn fix_filesystem_kcm_pods(generated_infra_id: &str, dir: &Path
 
                         fix_kcm_pod(&mut pod, &generated_infra_id)?;
 
-                        commit_file(
+                        write_file(
                             file_path,
                             serde_json::to_string(&pod).context("serializing kube-controller-manager-pod.yaml")?,
                         )
-                        .await
-                        .context("writing kube-controller-manager-pod.yaml to disk")?;
+                        .await;
 
                         anyhow::Ok(())
                     }
@@ -64,12 +63,11 @@ pub(crate) async fn fix_filesystem_kcm_configs(generated_infra_id: &str, dir: &P
 
                         fix_kcm_extended_args(&mut config, &generated_infra_id)?;
 
-                        commit_file(
+                        write_file(
                             file_path,
                             serde_json::to_string(&config).context("serializing kube-controller-manager config.yaml")?,
                         )
-                        .await
-                        .context("writing kube-controller-manager config.yaml to disk")?;
+                        .await;
 
                         anyhow::Ok(())
                     }
@@ -103,12 +101,11 @@ pub(crate) async fn fix_filesystem_kube_apiserver_configs(cluster_domain: &str, 
 
                         fix_api_server_arguments_domain(&mut config, &cluster_domain)?;
 
-                        commit_file(
+                        write_file(
                             file_path,
                             serde_json::to_string(&config).context("serializing kube-apiserver config.yaml")?,
                         )
-                        .await
-                        .context("writing kube-apiserver config.yaml to disk")?;
+                        .await;
 
                         anyhow::Ok(())
                     }
@@ -142,12 +139,11 @@ pub(crate) async fn fix_filesystem_kube_apiserver_oauth_metadata(cluster_domain:
 
                         fix_oauth_metadata(&mut config, &cluster_domain)?;
 
-                        commit_file(
+                        write_file(
                             file_path,
                             serde_json::to_string(&config).context("serializing kube-apiserver oauthMetadata")?,
                         )
-                        .await
-                        .context("writing kube-apiserver oauthMetadata to disk")?;
+                        .await;
 
                         anyhow::Ok(())
                     }
@@ -178,9 +174,7 @@ pub(crate) async fn fix_filesystem_currentconfig(cluster_domain: &str, dir: &Pat
 
                 fix_machineconfig(&mut config, &cluster_domain)?;
 
-                commit_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?)
-                    .await
-                    .context("writing currentconfig to disk")?;
+                write_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?).await;
 
                 anyhow::Ok(())
             }
@@ -206,9 +200,7 @@ pub(crate) async fn fix_filesystem_apiserver_url_env_files(cluster_domain: &str,
                 let contents = read_file_to_string(&file_path).await.context("reading apiserver-url.env")?;
 
                 // write back to disk
-                commit_file(file_path, fix_apiserver_url_file(contents.as_bytes().into(), &cluster_domain)?)
-                    .await
-                    .context("writing kubeconfig to disk")?;
+                write_file(file_path, fix_apiserver_url_file(contents.as_bytes().into(), &cluster_domain)?).await;
 
                 anyhow::Ok(())
             }
@@ -248,9 +240,7 @@ pub(crate) async fn fix_filesystem_kubeconfigs(cluster_name: &str, cluster_domai
                             .await
                             .context("fixing kubeconfig")?;
 
-                        commit_file(file_path, serde_yaml::to_string(&yaml_value).context("serializing kubeconfig")?)
-                            .await
-                            .context("writing kubeconfig to disk")?;
+                        write_file(file_path, serde_yaml::to_string(&yaml_value).context("serializing kubeconfig")?).await;
 
                         anyhow::Ok(())
                     }
@@ -280,9 +270,7 @@ pub(crate) async fn fix_filesystem_mcs_machine_config_content(cluster_domain: &s
 
                 fix_machineconfig(&mut config, cluster_domain)?;
 
-                commit_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?)
-                    .await
-                    .context("writing currentconfig to disk")?;
+                write_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?).await;
             }
         }
     }

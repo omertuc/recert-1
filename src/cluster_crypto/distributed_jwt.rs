@@ -6,7 +6,7 @@ use super::{
     locations::{FileContentLocation, FileLocation, K8sLocation, Location, LocationValueType, Locations},
 };
 use crate::{
-    file_utils::{commit_file, encode_resource_data_entry},
+    file_utils::{encode_resource_data_entry, write_file},
     k8s_etcd::{get_etcd_json, InMemoryK8sEtcd},
 };
 use anyhow::{bail, Context, Result};
@@ -91,7 +91,7 @@ impl DistributedJwt {
     }
 
     async fn commit_to_filesystem(jwt_regenerated: &Jwt, filelocation: &FileLocation) -> Result<()> {
-        commit_file(
+        write_file(
             &filelocation.path,
             match &filelocation.content_location {
                 FileContentLocation::Raw(pem_location_info) => match &pem_location_info {
@@ -102,7 +102,7 @@ impl DistributedJwt {
                 FileContentLocation::Yaml(_) => todo!("filesystem YAML JWTs not implemented"),
             },
         )
-        .await?;
+        .await;
 
         Ok(())
     }

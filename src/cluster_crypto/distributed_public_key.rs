@@ -10,7 +10,7 @@ use super::{
 };
 use crate::{
     file_utils::{
-        add_recert_edited_annotation, commit_file, get_filesystem_yaml, read_file_to_string, recreate_yaml_at_location_with_new_pem,
+        add_recert_edited_annotation, get_filesystem_yaml, read_file_to_string, recreate_yaml_at_location_with_new_pem, write_file,
     },
     k8s_etcd::{get_etcd_json, InMemoryK8sEtcd},
     rsa_key_pool::RsaKeyPool,
@@ -140,7 +140,7 @@ impl DistributedPublicKey {
             PublicKey::Ec(_) => bail!("ECDSA public key not yet supported for filesystem commit"),
         };
 
-        commit_file(
+        write_file(
             &filelocation.path,
             match &filelocation.content_location {
                 FileContentLocation::Raw(pem_location_info) => match &pem_location_info {
@@ -162,7 +162,7 @@ impl DistributedPublicKey {
                 }
             },
         )
-        .await?;
+        .await;
         Ok(())
     }
 }

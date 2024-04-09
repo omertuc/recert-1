@@ -1,11 +1,11 @@
 use crate::{
-    file_utils::{self, commit_file, read_file_to_string, DRY_RUN},
+    file_utils::{self, read_file_to_string, rename_file, write_file},
     ocp_postprocess::cluster_domain_rename::rename_utils,
 };
 use anyhow::{self, Context, Result};
 use futures_util::future::join_all;
 use serde_json::Value;
-use std::{fs, path::Path, sync::atomic::Ordering::Relaxed};
+use std::path::Path;
 
 pub(crate) async fn fix_filesystem_etcd_static_pods(original_hostname: &str, hostname: &str, dir: &Path) -> Result<()> {
     join_all(file_utils::globvec(dir, "**/etcd-pod.yaml")?.into_iter().map(|file_path| {
@@ -20,9 +20,7 @@ pub(crate) async fn fix_filesystem_etcd_static_pods(original_hostname: &str, hos
 
                 rename_utils::fix_etcd_static_pod(&mut pod, &original_hostname, &hostname).context("fixing etcd-pod.yaml")?;
 
-                commit_file(file_path, serde_json::to_string(&pod).context("serializing etcd-pod.yaml")?)
-                    .await
-                    .context("writing etcd-pod.yaml to disk")?;
+                write_file(file_path, serde_json::to_string(&pod).context("serializing etcd-pod.yaml")?).await;
 
                 anyhow::Ok(())
             }
@@ -48,12 +46,10 @@ pub(crate) async fn fix_filesystem_etcd_configmap_pod_yaml(original_hostname: &s
             async move {
                 let contents = read_file_to_string(&file_path).await.context("reading etcd-pod.yaml")?;
 
-                commit_file(
+                write_file(
                     file_path,
                     rename_utils::fix_etcd_pod_yaml_hostname(&contents, &original_hostname, &hostname).context("fixing etcd-pod.yaml")?,
-                )
-                .await
-                .context("writing etcd-pod.yaml to disk")?;
+                ).await;
 
                 anyhow::Ok(())
             }
@@ -82,13 +78,11 @@ pub(crate) async fn fix_filesystem_etcd_scripts_cluster_backup_sh(original_hostn
                     async move {
                         let contents = read_file_to_string(&file_path).await.context("reading cluster-backup.sh")?;
 
-                        commit_file(
+                        write_file(
                             file_path,
                             rename_utils::fix_cluster_backup_sh(&contents, &original_hostname, &hostname)
                                 .context("fixing cluster-backup.sh")?,
-                        )
-                        .await
-                        .context("writing cluster-backup.sh to disk")?;
+                        ).await;
 
                         anyhow::Ok(())
                     }
@@ -115,12 +109,10 @@ pub(crate) async fn fix_filesystem_etcd_scripts_etcd_env(original_hostname: &str
             async move {
                 let contents = read_file_to_string(&file_path).await.context("reading etcd.env")?;
 
-                commit_file(
+                write_file(
                     file_path,
                     rename_utils::fix_etcd_env(&contents, &original_hostname, &hostname).context("fixing etcd.env")?,
-                )
-                .await
-                .context("writing etcd.env to disk")?;
+                ).await;
 
                 anyhow::Ok(())
             }
@@ -155,12 +147,10 @@ pub(crate) async fn fix_filesystem_kapi_startup_monitor_pod(hostname: &str, dir:
                         rename_utils::fix_kapi_startup_monitor_pod_container_args(&mut pod, &hostname)
                             .context("fixing kube-apiserver-startup-monitor-pod.yaml")?;
 
-                        commit_file(
+                        write_file(
                             file_path,
                             serde_json::to_string(&pod).context("serializing kube-apiserver-startup-monitor-pod.yaml")?,
-                        )
-                        .await
-                        .context("writing kube-apiserver-startup-monitor-pod.yaml to disk")?;
+                        ).await;
 
                         anyhow::Ok(())
                     }
@@ -202,13 +192,12 @@ pub(crate) async fn fix_filesystem_kapi_startup_monitor_configmap_pod_yaml(
                         .await
                         .context("reading kube-apiserver-startup-monitor-pod.yaml")?;
 
-                    commit_file(
+                    write_file(
                         file_path,
                         rename_utils::fix_kapi_startup_monitor_pod_yaml(&contents, &original_hostname, &hostname)
                             .context("fixing kube-apiserver-startup-monitor-pod.yaml")?,
                     )
-                    .await
-                    .context("writing kube-apiserver-startup-monitor-pod.yaml to disk")?;
+                    .await;
 
                     anyhow::Ok(())
                 }
@@ -240,10 +229,7 @@ pub(crate) async fn fix_filesystem_etcd_all_certs(original_hostname: &str, hostn
             .replace(original_hostname, hostname);
         tokio::spawn(async move {
             async move {
-                if !DRY_RUN.load(Relaxed) {
-                    fs::rename(original_path, new_path)?;
-                }
-
+                rename_file(original_path, new_path).await.context("renaming etcd-all-certs")?;
                 anyhow::Ok(())
             }
             .await

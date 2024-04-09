@@ -1,5 +1,5 @@
 use super::utils::override_machineconfig_source;
-use crate::file_utils::{self, commit_file, read_file_to_string};
+use crate::file_utils::{self, read_file_to_string, write_file};
 use anyhow::{self, Context, Result};
 use futures_util::future::join_all;
 use serde_json::Value;
@@ -17,9 +17,7 @@ pub(crate) async fn fix_filesystem_mcs_machine_config_content(pull_secret: &str,
 
                 override_machineconfig_source(&mut config, pull_secret, "/var/lib/kubelet/config.json")?;
 
-                commit_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?)
-                    .await
-                    .context("writing currentconfig to disk")?;
+                write_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?).await;
             }
         }
     }
@@ -38,9 +36,7 @@ pub(crate) async fn fix_filesystem_currentconfig(pull_secret: &str, dir: &Path) 
 
                 override_machineconfig_source(&mut config, &pull_secret, "/var/lib/kubelet/config.json")?;
 
-                commit_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?)
-                    .await
-                    .context("writing currentconfig to disk")?;
+                write_file(file_path, serde_json::to_string(&config).context("serializing currentconfig")?).await;
 
                 anyhow::Ok(())
             }
@@ -50,7 +46,7 @@ pub(crate) async fn fix_filesystem_currentconfig(pull_secret: &str, dir: &Path) 
     }))
     .await
     .into_iter()
-    .collect::<core::result::Result<Vec<_>, _>>()?
+    .collect::<Result<Vec<_>, _>>()?
     .into_iter()
     .collect::<Result<Vec<_>>>()?;
 
@@ -65,23 +61,14 @@ pub(crate) async fn fix_filesystem_pull_secret(pull_secret: &str, dir: &Path) ->
     // TODO: add verification that config.json as actually pull_secret
     log::info!("setting pull secret in config.json");
     join_all(file_utils::globvec(dir, "**/config.json")?.into_iter().map(|file_path| {
-        let config_path = file_path.clone();
         let pull_secret = pull_secret.to_string();
         tokio::spawn(async move {
-            async move {
-                commit_file(file_path, &pull_secret).await.context("writing config.json to disk")?;
-
-                anyhow::Ok(())
-            }
-            .await
-            .context(format!("fixing config.json {:?}", config_path))
+            write_file(file_path, &pull_secret).await;
         })
     }))
     .await
     .into_iter()
-    .collect::<core::result::Result<Vec<_>, _>>()?
-    .into_iter()
-    .collect::<Result<Vec<_>>>()?;
+    .collect::<Result<Vec<_>, _>>()?;
 
     Ok(())
 }

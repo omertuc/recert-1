@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use cluster_crypto::ClusterCryptoObjects;
 use config::RecertConfig;
-use std::sync::atomic::Ordering::Relaxed;
 
 mod cluster_crypto;
 mod cnsanreplace;
@@ -31,8 +30,6 @@ fn main() -> Result<()> {
 
 async fn main_internal(config: RecertConfig) -> Result<()> {
     let mut cluster_crypto = ClusterCryptoObjects::new();
-
-    file_utils::DRY_RUN.store(config.dry_run, Relaxed);
 
     let run_result = recert::run(&config, &mut cluster_crypto).await;
 
